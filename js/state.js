@@ -7,6 +7,7 @@ export const state = {
   gridData: null,
   gridPointsData: null,
   gridMetricsLoaded: false,
+  gridTrafficLoaded: false,
   gridStats: {
     trafficMax: 0,
     populationMax: 0,

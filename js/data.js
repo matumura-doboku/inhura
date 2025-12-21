@@ -112,18 +112,13 @@ export function computeTrafficByGrid(roadsData, trafficMap) {
   return gridTraffic;
 }
 
-export async function computeGridMetrics(gridData, roadsData = null) {
+export async function computeGridMetrics(gridData) {
   if (!gridData) return { gridData, stats: { trafficMax: 0, populationMax: 0, floorMax: 0 } };
 
-  const [populationDetailMap, floorMap, trafficMap] = await Promise.all([
+  const [populationDetailMap, floorMap] = await Promise.all([
     loadPopulationDetailMap().catch(() => new Map()),
     loadFloorMap().catch(() => new Map()),
-    loadTrafficMap().catch(() => new Map()),
   ]);
-
-  const trafficByGrid = roadsData
-    ? computeTrafficByGrid(roadsData, trafficMap)
-    : new Map();
 
   let trafficMax = 0;
   let populationMax = 0;
@@ -132,7 +127,6 @@ export async function computeGridMetrics(gridData, roadsData = null) {
   (gridData.features || []).forEach((feature) => {
     const props = feature.properties || {};
     const key = props.KEY_CODE ? String(props.KEY_CODE) : '';
-    const trafficValue = trafficByGrid.get(key) || 0;
     const detail = populationDetailMap.get(key) || {
       total: 0,
       pop0_14: 0,
@@ -142,21 +136,20 @@ export async function computeGridMetrics(gridData, roadsData = null) {
     const populationValue = detail.total;
     const floorValue = floorMap.get(key) || 0;
 
-    props.traffic_value = trafficValue;
+    props.traffic_value = 0;
     props.population_value = populationValue;
     props.floor_value = floorValue;
     props.pop_0_14 = detail.pop0_14;
     props.pop_15_64 = detail.pop15_64;
     props.pop_65_over = detail.pop65_over;
 
-    if (trafficValue > trafficMax) trafficMax = trafficValue;
     if (populationValue > populationMax) populationMax = populationValue;
     if (floorValue > floorMax) floorMax = floorValue;
   });
 
   (gridData.features || []).forEach((feature) => {
     const props = feature.properties || {};
-    props.traffic_norm = trafficMax > 0 ? (props.traffic_value / trafficMax) * 100 : 0;
+    props.traffic_norm = 0;
     props.population_norm = populationMax > 0 ? (props.population_value / populationMax) * 100 : 0;
     props.floor_norm = floorMax > 0 ? (props.floor_value / floorMax) * 100 : 0;
     props.score_norm = (props.traffic_norm + props.population_norm + props.floor_norm) / 3;
@@ -167,6 +160,31 @@ export async function computeGridMetrics(gridData, roadsData = null) {
   });
 
   return { gridData, stats: { trafficMax, populationMax, floorMax } };
+}
+
+export async function computeGridTraffic(gridData, roadsData) {
+  const trafficMap = await loadTrafficMap().catch(() => new Map());
+  return computeTrafficByGrid(roadsData, trafficMap);
+}
+
+export function applyTrafficToGrid(gridData, trafficByGrid) {
+  if (!gridData) return { gridData, trafficMax: 0 };
+  let trafficMax = 0;
+  (gridData.features || []).forEach((feature) => {
+    const props = feature.properties || {};
+    const key = props.KEY_CODE ? String(props.KEY_CODE) : '';
+    const trafficValue = trafficByGrid.get(key) || 0;
+    props.traffic_value = trafficValue;
+    if (trafficValue > trafficMax) trafficMax = trafficValue;
+  });
+
+  (gridData.features || []).forEach((feature) => {
+    const props = feature.properties || {};
+    props.traffic_norm = trafficMax > 0 ? (props.traffic_value / trafficMax) * 100 : 0;
+    props.score_norm = (props.traffic_norm + props.population_norm + props.floor_norm) / 3;
+  });
+
+  return { gridData, trafficMax };
 }
 
 export async function computeRoadMetrics(roadsData, gridData) {

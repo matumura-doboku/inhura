@@ -85,7 +85,7 @@ async function ensureGridData() {
     await loadGrid();
   }
   if (!state.gridMetricsLoaded && state.gridData) {
-    const { gridData, stats } = await computeGridMetrics(state.gridData, state.roadsData);
+    const { gridData, stats } = await computeGridMetrics(state.gridData);
     state.gridData = gridData;
     state.gridStats = stats;
     state.gridMetricsLoaded = true;
@@ -114,6 +114,15 @@ function metricKey(metric) {
   return 'traffic_value';
 }
 
+async function ensureGridTraffic() {
+  if (state.gridTrafficLoaded) return;
+  window.dispatchEvent(new Event('grid:traffic:ensure'));
+  const start = Date.now();
+  while (!state.gridTrafficLoaded && Date.now() - start < 8000) {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+}
+
 async function runReport() {
   const source = reportSourceSelect.value || 'grid';
   const metric = reportMetricSelect.value || vizSelect.value || 'traffic';
@@ -122,6 +131,9 @@ async function runReport() {
 
   if (source === 'grid') {
     await ensureGridData();
+    if (metric === 'traffic' || metric === 'score') {
+      await ensureGridTraffic();
+    }
     const key = metricKey(metric);
     const rows = (state.gridData.features || [])
       .map((feature) => {

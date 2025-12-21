@@ -4,6 +4,13 @@ import { state, vizThemes } from './state.js';
 export function applyGridVisualization() {
   if (!state.map || !state.mapReady || !state.map.getLayer('grid-fill')) return;
   const mode = vizSelect.value;
+  const secondaryMode = vizSecondarySelect ? vizSecondarySelect.value : mode;
+
+  const needsTraffic = (value) => value === 'traffic' || value === 'score';
+  if (!state.gridTrafficLoaded && (needsTraffic(mode) || needsTraffic(secondaryMode))) {
+    window.dispatchEvent(new Event('grid:traffic:ensure'));
+  }
+
   const theme = vizThemes[mode] || vizThemes.traffic;
   const prop =
     mode === 'population'
@@ -20,7 +27,6 @@ export function applyGridVisualization() {
             ? 'score_norm'
             : 'traffic_norm';
 
-  const secondaryMode = vizSecondarySelect ? vizSecondarySelect.value : mode;
   const secondaryTheme = vizThemes[secondaryMode] || vizThemes.traffic;
   const secondaryProp =
     secondaryMode === 'population'

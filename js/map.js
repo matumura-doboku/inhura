@@ -1,6 +1,12 @@
 import { state } from './state.js';
 import { mapStatus, roadsStatus } from './dom.js';
-import { loadGridData, loadRoadsData, computeGridMetrics } from './data.js';
+import {
+  loadGridData,
+  loadRoadsData,
+  computeGridMetrics,
+  computeGridTraffic,
+  applyTrafficToGrid,
+} from './data.js';
 import { applyGridVisualization } from './ui-visualization.js';
 import { showPropertyPanel, hidePropertyPanel } from './ui-property.js';
 
@@ -46,6 +52,9 @@ export function initMap() {
   });
 
   state.map = map;
+  window.addEventListener('grid:traffic:ensure', () => {
+    ensureGridTraffic();
+  });
 }
 
 export function addRoadLayer(geojson) {
@@ -86,6 +95,7 @@ export async function loadRoads() {
     const geojson = await loadRoadsData();
     state.roadsData = geojson;
     addRoadLayer(geojson);
+    window.dispatchEvent(new Event('grid:traffic:ensure'));
   } catch (err) {
     if (roadsStatus) roadsStatus.textContent = '読み込み失敗';
     console.error(err);
@@ -172,20 +182,11 @@ function bindGridEvents() {
 async function hydrateGridMetrics() {
   if (!state.gridData || state.gridMetricsLoaded) return;
 
-  let roadsData = state.roadsData;
-  if (!roadsData) {
-    try {
-      roadsData = await loadRoadsData();
-      state.roadsData = roadsData;
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  const { gridData, stats } = await computeGridMetrics(state.gridData, roadsData);
+  const { gridData, stats } = await computeGridMetrics(state.gridData);
   state.gridData = gridData;
   state.gridStats = stats;
   state.gridMetricsLoaded = true;
+  state.gridTrafficLoaded = false;
 
   if (state.map && state.map.getSource('grid')) {
     state.map.getSource('grid').setData(state.gridData);
@@ -209,6 +210,32 @@ export async function loadGrid() {
     state.gridData = geojson;
     addGridLayer(geojson);
     await hydrateGridMetrics();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function ensureGridTraffic() {
+  if (state.gridTrafficLoaded || !state.gridData) return;
+
+  const roadsData = state.roadsData;
+  if (!roadsData) return;
+
+  try {
+    const trafficByGrid = await computeGridTraffic(state.gridData, roadsData);
+    const { gridData, trafficMax } = applyTrafficToGrid(state.gridData, trafficByGrid);
+    state.gridData = gridData;
+    state.gridStats.trafficMax = trafficMax;
+    state.gridTrafficLoaded = true;
+    if (state.map && state.map.getSource('grid')) {
+      state.map.getSource('grid').setData(state.gridData);
+    }
+    if (state.map && state.map.getSource('grid-points')) {
+      const points = buildGridPoints(state.gridData);
+      state.gridPointsData = points;
+      state.map.getSource('grid-points').setData(points);
+    }
+    applyGridVisualization();
   } catch (err) {
     console.error(err);
   }
@@ -245,19 +272,31 @@ function getGeometryCenter(geometry) {
 
 function buildGridPoints(gridData) {
   if (!gridData) return { type: 'FeatureCollection', features: [] };
+  const keepKeys = [
+    'KEY_CODE',
+    'traffic_norm',
+    'population_norm',
+    'floor_norm',
+    'ratio_0_14',
+    'ratio_15_64',
+    'ratio_65_over',
+    'score_norm',
+  ];
   const features = (gridData.features || []).map((feature) => {
     const center = getGeometryCenter(feature.geometry);
     if (!center) return null;
     const props = feature.properties || {};
+    const slimProps = {};
+    keepKeys.forEach((key) => {
+      if (props[key] != null) slimProps[key] = props[key];
+    });
     return {
       type: 'Feature',
       geometry: {
         type: 'Point',
         coordinates: center,
       },
-      properties: {
-        ...props,
-      },
+      properties: slimProps,
     };
   }).filter(Boolean);
 
