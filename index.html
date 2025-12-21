@@ -1,0 +1,211 @@
+﻿<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>道路廃止検討ダッシュボード</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <header class="brand">
+        <div class="brand-mark">R-Insight</div>
+        <div>
+          <div class="brand-title">道路廃止検討</div>
+          <div class="brand-sub">統計・交通量の重ね合わせ</div>
+        </div>
+      </header>
+
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-tab="home" role="tab" aria-selected="true">ホーム</button>
+        <button class="tab" data-tab="viz" role="tab" aria-selected="false">可視化</button>
+        <button class="tab" data-tab="report" role="tab" aria-selected="false">レポート</button>
+      </nav>
+
+      <section class="panel active" id="panel-home" data-panel="home" role="tabpanel">
+        <div class="section">
+          <h2>住所検索</h2>
+          <label class="field">
+            <span>住所・地名</span>
+            <input id="address-input" type="text" placeholder="例: 広島市中区紙屋町" />
+          </label>
+          <ul id="address-results" class="suggestions"></ul>
+          <div class="row gap">
+            <button class="btn" id="address-move">候補へ移動</button>
+            <button class="btn ghost" id="address-clear">クリア</button>
+          </div>
+          <p class="hint">国土地理院の住所検索APIを利用します。</p>
+        </div>
+
+        <div class="section">
+          <h2>操作ガイド</h2>
+          <p class="muted">初めて利用する方向けに簡易ガイドを表示します。</p>
+          <button class="btn" id="open-guide">ガイドを開く</button>
+        </div>
+
+        <div class="section">
+          <h2>ステータス</h2>
+          <div class="status-grid">
+            <div class="status-card">
+              <span class="label">地図状態</span>
+              <span id="status-map">準備中</span>
+            </div>
+            <div class="status-card">
+              <span class="label">道路レイヤ</span>
+              <span id="status-roads">未読み込み</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-viz" data-panel="viz" role="tabpanel">
+        <div class="section">
+          <h2>表示項目</h2>
+          <label class="field">
+            <span>可視化データ</span>
+            <select id="viz-select">
+              <option value="traffic">交通量</option>
+              <option value="population">人口</option>
+              <option value="floor">床面積</option>
+              <option value="ratio_0_14">年齢構成（0-15）</option>
+              <option value="ratio_15_64">年齢構成（15-65）</option>
+              <option value="ratio_65_over">年齢構成（65以上）</option>
+              <option value="score">必要度スコア</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>表示項目2（円サイズ）</span>
+            <select id="viz-select-secondary">
+              <option value="traffic">交通量</option>
+              <option value="population">人口</option>
+              <option value="floor">床面積</option>
+              <option value="ratio_0_14">年齢構成（0-15）</option>
+              <option value="ratio_15_64">年齢構成（15-65）</option>
+              <option value="ratio_65_over">年齢構成（65以上）</option>
+              <option value="score">必要度スコア</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="section">
+          <h2>道路レイヤ</h2>
+          <div class="row gap">
+            <button class="btn" id="roads-load">道路レイヤ読み込み</button>
+            <button class="btn ghost" id="roads-toggle">表示切替</button>
+          </div>
+          <p class="hint">データは `data/roads/hirosima/roads.geojson` を読み込みます。</p>
+        </div>
+
+        <div class="section">
+          <h2>凡例</h2>
+          <div class="legend" id="viz-legend">
+            <div class="legend-title" id="legend-title">交通量</div>
+            <div class="legend-bar" id="legend-bar"></div>
+            <div class="legend-range">
+              <span>低</span>
+              <span>高</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-report" data-panel="report" role="tabpanel">
+        <div class="section">
+          <h2>レポート概要</h2>
+          <div class="status-grid">
+            <div class="status-card">
+              <span class="label">対象件数</span>
+              <span id="report-count">-</span>
+            </div>
+            <div class="status-card">
+              <span class="label">平均値</span>
+              <span id="report-avg">-</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>上位抽出</h2>
+          <label class="field">
+            <span>対象データ</span>
+            <select id="report-source">
+              <option value="grid">グリッド（セル）</option>
+              <option value="roads">道路区画</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>指標</span>
+            <select id="report-metric">
+              <option value="traffic">交通量</option>
+              <option value="population">人口</option>
+              <option value="floor">床面積</option>
+              <option value="ratio_0_14">年齢構成（0-15）</option>
+              <option value="ratio_15_64">年齢構成（15-65）</option>
+              <option value="ratio_65_over">年齢構成（65以上）</option>
+              <option value="score">必要度スコア</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>表示件数</span>
+            <input id="report-limit" type="number" min="5" max="100" value="20" />
+          </label>
+          <div class="row gap">
+            <button class="btn" id="report-run">上位表示</button>
+            <button class="btn ghost" id="report-export">CSV出力</button>
+          </div>
+          <div class="table-wrap" style="margin-top: 12px;">
+            <table class="report-table" id="report-table">
+              <thead>
+                <tr>
+                  <th>順位</th>
+                  <th>ID</th>
+                  <th>指標</th>
+                  <th>値</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="placeholder"><td colspan="4">上位表示を実行するとここに一覧が入ります。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <main class="map-wrap">
+      <div id="map"></div>
+      <div class="map-hint">地図: 国土地理院タイル / MapLibre GL JS</div>
+      <aside class="property-panel" id="property-panel" aria-hidden="true">
+        <header class="property-header">
+          <div>
+            <div class="property-title" id="property-title">セル情報</div>
+            <div class="property-sub" id="property-sub">セル未選択</div>
+          </div>
+          <button class="btn ghost" id="property-close">閉じる</button>
+        </header>
+        <div class="property-body" id="property-body">
+          <p class="muted">セルをクリックすると情報が表示されます。</p>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <div class="overlay hidden" id="guide-overlay" aria-hidden="true">
+    <div class="overlay-card">
+      <header>
+        <h3>操作ガイド</h3>
+        <button class="btn ghost" id="guide-close">閉じる</button>
+      </header>
+      <div id="guide-body" class="overlay-body">読み込み中...</div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
