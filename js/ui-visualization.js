@@ -21,6 +21,7 @@ import {
   vizConditionBody,
   vizCountPrimary,
   vizCountSecondary,
+  vizYearRadios,
 } from './dom.js';
 import { state, vizThemes } from './state.js';
 
@@ -284,9 +285,10 @@ export function updateConditionSummary() {
   const filterMode = vizFilterMode?.value || 'none';
   const { primary: primaryFilterSpec, secondary: secondaryFilterSpec } = resolveFilterSpecs(filterMode);
 
+  const selectedYear = Array.from(vizYearRadios).find(r => r.checked)?.value || '2020';
   const displayLine = {
     label: '',
-    text: `表示1 ${primaryLabel}　表示2 ${secondaryLabel}`,
+    text: `年 ${selectedYear}　表示1 ${primaryLabel}　表示2 ${secondaryLabel}`,
   };
 
   if (filterMode === 'none' || (!primaryFilterSpec && !secondaryFilterSpec)) {
@@ -484,4 +486,15 @@ export function initVisualization() {
 
   updateLegend();
   vizSelect.addEventListener('change', updateLegend);
+
+  if (vizYearRadios) {
+    vizYearRadios.forEach((radio) => {
+      radio.addEventListener('change', (e) => {
+        if (e.target.checked) {
+          const year = Number(e.target.value);
+          window.dispatchEvent(new CustomEvent('viz:year:changed', { detail: { year } }));
+        }
+      });
+    });
+  }
 }

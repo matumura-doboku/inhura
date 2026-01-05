@@ -20,8 +20,8 @@ function formatPercent(value) {
 }
 
 function setPanelContent(props) {
+  console.log('setPanelContent props:', props);
   const code = props.KEY_CODE || '-';
-  const population = props.population_value || 0;
   const labor = props.labor_value || 0;
   const traffic = props.traffic_value || 0;
   const floor = props.floor_value || 0;
@@ -41,8 +41,16 @@ function setPanelContent(props) {
   propertyBody.innerHTML = `
     <dl class="property-list">
       <div>
-        <dt>人口</dt>
-        <dd>${formatNumber(population)}</dd>
+        <dt>2020年人口</dt>
+        <dd>${formatNumber(props.pop_2020 || 0)}</dd>
+      </div>
+      <div>
+        <dt>2015年人口</dt>
+        <dd>${formatNumber(props.pop_2015 || 0)}</dd>
+      </div>
+      <div>
+        <dt>2010年人口</dt>
+        <dd>${formatNumber(props.pop_2010 || 0)}</dd>
       </div>
       <div>
         <dt>労働者数</dt>

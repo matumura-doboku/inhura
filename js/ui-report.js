@@ -15,6 +15,20 @@ import {
   reportRangeStatus,
   vizSelect,
   vizSecondarySelect,
+  reportModeSelect,
+  reportModeSearch,
+  reportModeAggregation,
+  reportAggMetric,
+  reportAggYearRadios,
+  reportAggRunBtn,
+  aggSum,
+  aggAvgRange,
+  aggAvgTotal,
+  aggCount,
+  aggMax,
+  aggMin,
+  cardAggMax,
+  cardAggMin,
 } from './dom.js';
 import { state } from './state.js';
 import {
@@ -80,7 +94,6 @@ function renderReport(rows, metric, { clickable = false } = {}) {
     tr.innerHTML = `
       <td>${index + 1}</td>
       <td>${row.id}</td>
-      <td>${metricLabels[metric] || metric}</td>
       <td>${formatValue(metric, row.value)}</td>
     `;
     tbody.appendChild(tr);
@@ -91,19 +104,52 @@ function renderReport(rows, metric, { clickable = false } = {}) {
 }
 
 function exportReportCSV() {
-  const rows = Array.from(reportTable.querySelectorAll('tbody tr'))
-    .filter((tr) => !tr.classList.contains('placeholder'))
-    .map((tr) => Array.from(tr.children).map((td) => td.textContent));
+  const dataset = state.reportResults || [];
+  if (!dataset.length) return;
 
-  if (!rows.length) return;
+  // Get metadata for filename
+  let year = 2020;
+  const yearRadios = document.getElementsByName('stats-year');
+  if (yearRadios.length > 0) {
+    const selected = Array.from(yearRadios).find(r => r.checked);
+    if (selected) year = selected.value;
+  }
 
-  const header = ['順位', 'ID', '指標', '値'];
-  const csv = [header, ...rows].map((row) => row.join(',')).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const metricSource = reportMetricSourceSelect?.value || 'primary';
+  const metricKeySelected = metricSource === 'secondary'
+    ? (vizSecondarySelect?.value || vizSelect.value || 'traffic')
+    : (vizSelect.value || 'traffic');
+  const metricLabel = metricLabels[metricKeySelected] || metricKeySelected;
+
+  const orderLabel = (reportOrderSelect?.value === 'asc') ? '下位' : '上位';
+  const filename = `${year}_${metricLabel}_${orderLabel}.csv`;
+
+  // Define column order: Rank, kye_code, then all defined metrics
+  const allMetricKeys = Object.keys(metricLabels);
+
+  // Header row
+  const header = ['順位', 'kye_code', ...allMetricKeys.map(k => metricLabels[k])];
+
+  const csvRows = dataset.map((row, index) => {
+    const props = row.properties || {};
+
+    // Map each metric key to its value from the properties object
+    const metricValues = allMetricKeys.map(key => {
+      const propKey = metricKey(key);
+      const val = props[propKey];
+      // Format value but remove commas for CSV safety
+      return String(formatValue(key, val)).replace(/,/g, '');
+    });
+
+    return [index + 1, row.id, ...metricValues].join(',');
+  });
+
+  const csv = [header.join(','), ...csvRows].join('\n');
+  const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'report.csv';
+  link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -113,7 +159,13 @@ async function ensureGridData() {
     await loadGrid();
   }
   if (!state.gridMetricsLoaded && state.gridData) {
-    const { gridData, stats } = await computeGridMetrics(state.gridData);
+    let year = 2020;
+    const radios = document.getElementsByName('stats-year');
+    if (radios.length > 0) {
+      const selected = Array.from(radios).find(r => r.checked);
+      if (selected) year = Number(selected.value);
+    }
+    const { gridData, stats } = await computeGridMetrics(state.gridData, year);
     state.gridData = gridData;
     state.gridStats = stats;
     state.gridMetricsLoaded = true;
@@ -179,24 +231,31 @@ async function runReport() {
     const rangeIds = state.reportRange?.gridIds || [];
     const rangeSet = rangeIds.length ? new Set(rangeIds.map((id) => String(id))) : null;
     const key = metricKey(metric);
+
     const features = (state.gridData.features || []).filter((feature) => {
-      if (predicate && !predicate(feature)) return false;
+      const id = feature.properties?.KEY_CODE;
+      // If range is selected, only cells within the range are considered.
+      // We ignore the search predicate to ensure ALL cells in the range are included.
       if (rangeSet) {
-        const id = feature.properties?.KEY_CODE;
-        if (!id || !rangeSet.has(String(id))) return false;
+        return id && rangeSet.has(String(id));
       }
+      // If no range, apply the search predicate (if any).
+      if (predicate && !predicate(feature)) return false;
       return true;
     });
-    const rows = features
+    const allRows = features
       .map((feature) => {
         const props = feature.properties || {};
         return {
           id: props.KEY_CODE || '-',
           value: props[key] || 0,
+          properties: props,
         };
       })
-      .sort((a, b) => (order === 'asc' ? a.value - b.value : b.value - a.value))
-      .slice(0, limit);
+      .sort((a, b) => (order === 'asc' ? a.value - b.value : b.value - a.value));
+
+    state.reportResults = allRows;
+    const rows = allRows.slice(0, limit);
 
     renderReport(rows, metric, { clickable: true });
     setTopRoadIds([]);
@@ -204,19 +263,222 @@ async function runReport() {
   } else {
     await loadRoads();
     await ensureRoadMetrics();
+    const rangeIds = state.reportRange?.gridIds || [];
+    const rangeSet = rangeIds.length ? new Set(rangeIds.map((id) => String(id))) : null;
     const key = metricKey(metric);
-    const rows = Array.from(state.roadsMetrics.values())
+
+    const allRows = Array.from(state.roadsMetrics.values())
+      .filter((entry) => {
+        // If range is selected, only consider roads in that range (if applicable/already handled in gridIds)
+        // Here we assume rangeSet check is preferred if active.
+        if (rangeSet) {
+          // Road entries often link to grid IDs or have their own IDs. 
+          // Assuming we want everything from the loaded road set if it's been filtered by range during computeRoadMetrics
+          return true;
+        }
+        return true;
+      })
       .map((entry) => ({
         id: entry.id,
         value: entry[key] || 0,
+        properties: entry,
       }))
-      .sort((a, b) => (order === 'asc' ? a.value - b.value : b.value - a.value))
-      .slice(0, limit);
+      .sort((a, b) => (order === 'asc' ? a.value - b.value : b.value - a.value));
+
+    state.reportResults = allRows;
+    const rows = allRows.slice(0, limit);
 
     renderReport(rows, metric, { clickable: false });
     setTopGridIds([]);
     setTopRoadIds(rows.map((row) => String(row.id)));
   }
+}
+
+async function runAggregation() {
+  const metric = reportAggMetric?.value || 'population';
+  let year = 2020;
+  if (reportAggYearRadios) {
+    const selected = Array.from(reportAggYearRadios).find(r => r.checked);
+    if (selected) year = Number(selected.value);
+  }
+
+  // Ensure data loaded
+  await ensureGridData();
+  const isTraffic = metric === 'traffic' || metric === 'score';
+  if (isTraffic) {
+    await ensureGridTraffic();
+  }
+  // For safety, re-compute if year changed
+  const { gridData } = await computeGridMetrics(state.gridData, year);
+  state.gridData = gridData; // Update state with fresh metrics for that year
+
+  const rangeIds = state.reportRange?.gridIds || [];
+  const rangeSet = rangeIds.length ? new Set(rangeIds.map((id) => String(id))) : null;
+
+  // Key to read
+  const key = metricKey(metric);
+  const features = state.gridData.features || [];
+
+  let rangeSum = 0;
+  let rangeCountVal = 0;
+  let totalSum = 0;
+  let totalCountVal = 0;
+  let rangeMaxVal = -Infinity;
+  let rangeMinVal = Infinity;
+  let rangeMaxId = null;
+  let rangeMinId = null;
+
+  features.forEach((feature) => {
+    const val = Number(feature.properties?.[key] || 0);
+    // Total stats
+    if (Number.isFinite(val) && val !== 0) {
+      totalSum += val;
+      totalCountVal++;
+    }
+
+    // Range stats
+    const id = feature.properties?.KEY_CODE;
+    if (rangeSet && id && rangeSet.has(String(id))) {
+      if (Number.isFinite(val) && val !== 0) {
+        rangeSum += val;
+        rangeCountVal++;
+        if (val > rangeMaxVal) {
+          rangeMaxVal = val;
+          rangeMaxId = id;
+        }
+        if (val < rangeMinVal) {
+          rangeMinVal = val;
+          rangeMinId = id;
+        }
+      }
+    }
+  });
+
+  const rangeAvg = rangeCountVal > 0 ? rangeSum / rangeCountVal : 0;
+  const totalAvg = totalCountVal > 0 ? totalSum / totalCountVal : 0;
+
+  if (aggSum) aggSum.textContent = formatValue(metric, rangeSum);
+  if (aggAvgRange) aggAvgRange.textContent = formatValue(metric, rangeAvg);
+  if (aggAvgTotal) aggAvgTotal.textContent = formatValue(metric, totalAvg);
+  if (aggCount) aggCount.textContent = `${rangeCountVal} / ${totalCountVal}`;
+
+  if (aggMax) {
+    aggMax.textContent = rangeMaxId ? formatValue(metric, rangeMaxVal) : '-';
+    if (cardAggMax) cardAggMax.dataset.targetId = rangeMaxId || '';
+  }
+
+  if (aggMin) {
+    aggMin.textContent = rangeMinId ? formatValue(metric, rangeMinVal) : '-';
+    if (cardAggMin) cardAggMin.dataset.targetId = rangeMinId || '';
+  }
+
+  // Store results for aggregation export as well
+  state.aggResults = {
+    metric,
+    year,
+    rangeSum,
+    rangeAvg,
+    totalAvg,
+    rangeCountVal,
+    totalCountVal,
+    rangeMaxVal,
+    rangeMaxId,
+    rangeMinVal,
+    rangeMinId
+  };
+}
+
+function exportAggCSV() {
+  if (!state.aggResults || !state.gridData) return;
+
+  const year = state.aggResults.year;
+  const filename = `${year}_範囲内集計結果_全指標.csv`;
+
+  const rangeIds = state.reportRange?.gridIds || [];
+  const rangeSet = rangeIds.length ? new Set(rangeIds.map((id) => String(id))) : new Set();
+
+  // List of all metrics
+  const metrics = Object.keys(metricLabels);
+
+  // Initialize stats accumulator
+  const stats = {};
+  metrics.forEach(m => {
+    stats[m] = {
+      rangeSum: 0,
+      rangeCount: 0,
+      totalSum: 0,
+      totalCount: 0,
+      rangeMaxVal: -Infinity,
+      rangeMaxId: null,
+      rangeMinVal: Infinity,
+      rangeMinId: null
+    };
+  });
+
+  // Iterate over features to aggregate data
+  const features = state.gridData.features || [];
+  features.forEach((feature) => {
+    const id = feature.properties?.KEY_CODE;
+    const isInRange = id && rangeSet.has(String(id));
+
+    metrics.forEach(m => {
+      const key = metricKey(m);
+      const val = Number(feature.properties?.[key] || 0);
+
+      // Exclude 0 values from average/min/max calculation as per existing logic
+      if (Number.isFinite(val) && val !== 0) {
+        // Total Stats
+        stats[m].totalSum += val;
+        stats[m].totalCount += 1;
+
+        // Range Stats
+        if (isInRange) {
+          stats[m].rangeSum += val;
+          stats[m].rangeCount += 1;
+
+          if (val > stats[m].rangeMaxVal) {
+            stats[m].rangeMaxVal = val;
+            stats[m].rangeMaxId = id;
+          }
+          if (val < stats[m].rangeMinVal) {
+            stats[m].rangeMinVal = val;
+            stats[m].rangeMinId = id;
+          }
+        }
+      }
+    });
+  });
+
+  const header = ['指標', '年度', '範囲合計', '範囲平均', '全体平均', '最大値', '最大値ID', '最小値', '最小値ID'];
+  const csvRows = metrics.map(m => {
+    const s = stats[m];
+    const rangeAvg = s.rangeCount > 0 ? s.rangeSum / s.rangeCount : 0;
+    const totalAvg = s.totalCount > 0 ? s.totalSum / s.totalCount : 0;
+
+    const rangeMaxStr = s.rangeMaxId ? formatValue(m, s.rangeMaxVal).replace(/,/g, '') : '-';
+    const rangeMinStr = s.rangeMinId ? formatValue(m, s.rangeMinVal).replace(/,/g, '') : '-';
+
+    return [
+      metricLabels[m],
+      year,
+      formatValue(m, s.rangeSum).replace(/,/g, ''),
+      formatValue(m, rangeAvg).replace(/,/g, ''),
+      formatValue(m, totalAvg).replace(/,/g, ''),
+      rangeMaxStr,
+      s.rangeMaxId || '-',
+      rangeMinStr,
+      s.rangeMinId || '-'
+    ].join(',');
+  });
+
+  const csv = [header.join(','), ...csvRows].join('\n');
+  const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export function initReport() {
@@ -227,8 +489,46 @@ export function initReport() {
     });
   }
 
+  if (reportModeSelect) {
+    reportModeSelect.addEventListener('change', () => {
+      const mode = reportModeSelect.value;
+      if (reportModeSearch) {
+        reportModeSearch.classList.toggle('is-hidden', mode !== 'search');
+      }
+      if (reportModeAggregation) {
+        reportModeAggregation.classList.toggle('is-hidden', mode !== 'aggregation');
+      }
+    });
+  }
+
   if (reportRunBtn) {
     reportRunBtn.addEventListener('click', runReport);
+  }
+
+  if (reportAggRunBtn) {
+    reportAggRunBtn.addEventListener('click', runAggregation);
+  }
+
+  const aggExportBtn = document.getElementById('report-agg-export');
+  if (aggExportBtn) {
+    aggExportBtn.addEventListener('click', exportAggCSV);
+  }
+
+  const setupNavCard = (card) => {
+    if (!card) return;
+    card.addEventListener('click', () => {
+      const id = card.dataset.targetId;
+      if (id) focusGridById(id);
+    });
+  };
+  setupNavCard(cardAggMax);
+  setupNavCard(cardAggMin);
+
+  if (vizSelect && reportAggMetric) {
+    reportAggMetric.value = vizSelect.value;
+    vizSelect.addEventListener('change', () => {
+      if (reportAggMetric) reportAggMetric.value = vizSelect.value;
+    });
   }
 
   const setRangeStatus = (text) => {

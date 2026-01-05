@@ -6,6 +6,7 @@ import { initReport } from './ui-report.js';
 import { initSummary } from './ui-summary.js';
 import { initGuide } from './ui-guide.js';
 import { initPropertyPanel } from './ui-property.js';
+import { initDropdowns } from './ui-dropdown.js';
 import { roadsLoadBtn, roadsToggleBtn } from './dom.js';
 import { loadState, initAutoSave, bindMapEvents, initShareButton, resetState } from './state-sync.js';
 import { state } from './state.js';
@@ -18,6 +19,7 @@ initReport();
 initSummary();
 initGuide();
 initPropertyPanel();
+initDropdowns();
 
 // 保存された状態の復元（地理的位置を含む）
 const initialView = loadState();

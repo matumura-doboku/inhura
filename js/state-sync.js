@@ -15,6 +15,10 @@ import {
     vizColorIntervalInput,
     vizCircleScaleInput,
     vizFillEmptyBlack,
+    vizYearRadios,
+    reportModeSelect,
+    reportAggMetric,
+    reportAggYearRadios,
 } from './dom.js';
 
 const STORAGE_KEY = 'intai_app_state';
@@ -38,6 +42,10 @@ const STATE_MAP = {
     ci: 'ci',
     cs: 'cs',
     eb: 'eb',
+    vizY: 'vy',
+    repM: 'rm',
+    aggM: 'am',
+    aggY: 'ay',
 };
 
 /**
@@ -47,6 +55,11 @@ function getCurrentState() {
     const activeTab = document.querySelector('.tab.active')?.dataset.tab || 'home';
     const center = state.map ? state.map.getCenter() : { lat: 34.3853, lng: 132.4553 };
     const zoom = state.map ? state.map.getZoom() : 12.5;
+
+    let selectedYear = '2020';
+    if (vizYearRadios) {
+        selectedYear = Array.from(vizYearRadios).find(r => r.checked)?.value || '2020';
+    }
 
     return {
         tab: activeTab,
@@ -66,6 +79,10 @@ function getCurrentState() {
         ci: vizColorIntervalInput?.value,
         cs: vizCircleScaleInput?.value,
         eb: vizFillEmptyBlack?.checked ? '1' : '0',
+        vizY: selectedYear,
+        repM: reportModeSelect?.value,
+        aggM: reportAggMetric?.value,
+        aggY: Array.from(reportAggYearRadios || []).find(r => r.checked)?.value || '2020',
     };
 }
 
@@ -127,10 +144,37 @@ export function loadState() {
     if (vizCircleScaleInput) vizCircleScaleInput.value = getVal('cs') || vizCircleScaleInput.value;
     if (vizFillEmptyBlack) vizFillEmptyBlack.checked = getVal('eb') === '1';
 
+    const yearVal = getVal('vizY');
+    if (yearVal && vizYearRadios) {
+        Array.from(vizYearRadios).forEach(r => {
+            if (r.value === yearVal) r.checked = true;
+        });
+        // 状態復元時にもイベントを飛ばして地図等の同期待ち受け側に知らせる
+        window.dispatchEvent(new CustomEvent('viz:year:changed', { detail: { year: Number(yearVal) } }));
+    }
+
     // 3. 地図位置の適用 (地図がロードされた後に呼び出す必要がある)
     const lat = parseFloat(getVal('lat'));
     const lng = parseFloat(getVal('lng'));
     const zoom = parseFloat(getVal('z'));
+
+    // 4. 分析モード・集計設定の適用
+    if (reportModeSelect) {
+        const val = getVal('repM');
+        if (val) {
+            reportModeSelect.value = val;
+            reportModeSelect.dispatchEvent(new Event('change'));
+        }
+    }
+    if (reportAggMetric) {
+        reportAggMetric.value = getVal('aggM') || reportAggMetric.value;
+    }
+    const aggYearVal = getVal('aggY');
+    if (aggYearVal && reportAggYearRadios) {
+        Array.from(reportAggYearRadios).forEach(r => {
+            if (r.value === aggYearVal) r.checked = true;
+        });
+    }
 
     return {
         lat: isNaN(lat) ? null : lat,
@@ -159,6 +203,20 @@ export function initAutoSave() {
             saveState();
         });
     });
+
+    if (vizYearRadios) {
+        vizYearRadios.forEach(el => {
+            el.addEventListener('change', saveState);
+        });
+    }
+
+    if (reportModeSelect) reportModeSelect.addEventListener('change', saveState);
+    if (reportAggMetric) reportAggMetric.addEventListener('change', saveState);
+    if (reportAggYearRadios) {
+        reportAggYearRadios.forEach(el => {
+            el.addEventListener('change', saveState);
+        });
+    }
 
     // タブの変更監視
     tabs.forEach(tab => {

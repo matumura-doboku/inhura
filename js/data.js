@@ -3,13 +3,69 @@ function parseCsv(text) {
   if (!clean) return { header: [], rows: [] };
   const lines = clean.split(/\r?\n/);
   const header = lines[0].split(',');
-  const rows = lines.slice(1).map((line) => line.split(','));
+  let rows = lines.slice(1).map((line) => line.split(','));
+
+  // filtering out the japanese label row if present (usually 2nd line, starts with empty or '人口' etc if shifted?)
+  // e-Stat standard: 1st line codes, 2nd line labels. 2nd line usually starts with empty if KEY_CODE is matched, or just labels.
+  // Check if first col of first row is not a number (KEY_CODE is number).
+  if (rows.length > 0) {
+    const firstCell = rows[0][0];
+    // If first cell is empty or explicitly not a digit-only string (approx check for key code)
+    if (!firstCell || !/^\d+$/.test(firstCell)) {
+      rows = rows.slice(1);
+    }
+  }
+
   return { header, rows };
 }
 
 function toNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+export async function loadPopulationHistory() {
+  const [d2020, d2015, d2010] = await Promise.all([
+    fetchCsv('data/statistical/2020/tblT001101H34.csv').catch(() => ({ header: [], rows: [] })),
+    fetchCsv('data/statistical/2015/tblT000847H34.csv').catch(() => ({ header: [], rows: [] })),
+    fetchCsv('data/statistical/2010/merged_tblT000609H.csv').catch(() => ({ header: [], rows: [] })),
+  ]);
+
+  const map = new Map();
+
+  const process = (data, yearKey, colName) => {
+    const keyIdx = data.header.indexOf('KEY_CODE');
+    const valIdx = data.header.indexOf(colName);
+    if (keyIdx === -1 || valIdx === -1) return;
+
+    // Debug CSV keys
+    if (data.rows.length > 0) {
+      const sampleKey = data.rows[0][keyIdx];
+      console.log(`CSV Key Sample (${yearKey}):`, { key: sampleKey, type: typeof sampleKey });
+    }
+
+    data.rows.forEach(row => {
+      const rawKey = row[keyIdx];
+      if (!rawKey) return;
+      const key = String(rawKey).trim();
+      const val = toNumber(row[valIdx]);
+      if (!map.has(key)) map.set(key, {});
+      map.get(key)[yearKey] = val;
+    });
+  };
+
+  process(d2020, 'pop2020', 'T001101001');
+  process(d2015, 'pop2015', 'T000847001');
+  process(d2010, 'pop2010', 'T000609001');
+
+  console.log('PopulationHistory Loaded:', {
+    mapSize: map.size,
+    d2020_rows: d2020.rows.length,
+    d2015_rows: d2015.rows.length,
+    d2010_rows: d2010.rows.length
+  });
+
+  return map;
 }
 
 async function fetchJson(url) {
@@ -32,42 +88,82 @@ export async function loadRoadsData() {
   return fetchJson('data/roads/hirosima/roads.geojson');
 }
 
-export async function loadPopulationDetailMap() {
-  const { header, rows } = await fetchCsv('data/statistical/tblT001101H34.csv');
-  const keyIndex = header.indexOf('KEY_CODE');
-  const totalIndex = header.indexOf('T001101001');
-  const pop0Index = header.indexOf('T001101004');
-  const pop15Index = header.indexOf('T001101010');
-  const pop65Index = header.indexOf('T001101019');
-  const map = new Map();
-  rows.forEach((cols) => {
-    const key = cols[keyIndex];
-    if (!key) return;
-    const total = toNumber(cols[totalIndex]);
-    const pop0 = toNumber(cols[pop0Index]);
-    const pop15 = toNumber(cols[pop15Index]);
-    const pop65 = toNumber(cols[pop65Index]);
-    map.set(key, {
-      total,
-      pop0_14: pop0,
-      pop15_64: pop15,
-      pop65_over: pop65,
+export async function loadPopulationDetailMap(year = 2020) {
+  const y = Number(year);
+  let filename = `data/statistical/${y}/tblT001101H34.csv`;
+  let codes = {
+    total: 'T001101001',
+    pop0: 'T001101004',
+    pop15: 'T001101010',
+    pop65: 'T001101019',
+  };
+
+  if (y === 2015) {
+    filename = 'data/statistical/2015/tblT000847H34.csv';
+    codes = {
+      total: 'T000847001',
+      pop0: 'T000847004',
+      pop15: 'T000847010',
+      pop65: 'T000847016',
+    };
+  } else if (y === 2010) {
+    filename = 'data/statistical/2010/merged_tblT000609H.csv';
+    codes = {
+      total: 'T000609001',
+      pop0: '',
+      pop15: '',
+      pop65: '',
+    };
+  }
+
+  try {
+    const { header, rows } = await fetchCsv(filename);
+    const keyIndex = header.indexOf('KEY_CODE');
+    const totalIndex = codes.total ? header.indexOf(codes.total) : -1;
+    const pop0Index = codes.pop0 ? header.indexOf(codes.pop0) : -1;
+    const pop15Index = codes.pop15 ? header.indexOf(codes.pop15) : -1;
+    const pop65Index = codes.pop65 ? header.indexOf(codes.pop65) : -1;
+
+    const map = new Map();
+    rows.forEach((cols) => {
+      const rawKey = cols[keyIndex];
+      if (!rawKey) return;
+      const key = String(rawKey).trim();
+      const total = totalIndex !== -1 ? toNumber(cols[totalIndex]) : 0;
+      const pop0 = pop0Index !== -1 ? toNumber(cols[pop0Index]) : 0;
+      const pop15 = pop15Index !== -1 ? toNumber(cols[pop15Index]) : 0;
+      const pop65 = pop65Index !== -1 ? toNumber(cols[pop65Index]) : 0;
+      map.set(key, {
+        total,
+        pop0_14: pop0,
+        pop15_64: pop15,
+        pop65_over: pop65,
+      });
     });
-  });
-  return map;
+    return map;
+  } catch (e) {
+    console.warn(`Failed to load population detail for ${year}:`, e);
+    return new Map();
+  }
 }
 
-export async function loadLaborMap() {
-  const { header, rows } = await fetchCsv('data/statistical/tblT001108H34.csv');
-  const keyIndex = header.indexOf('KEY_CODE');
-  const valueIndex = header.indexOf('roudousyasuu');
-  const map = new Map();
-  rows.forEach((cols) => {
-    const key = cols[keyIndex];
-    if (!key) return;
-    map.set(key, toNumber(cols[valueIndex]));
-  });
-  return map;
+export async function loadLaborMap(year = 2020) {
+  try {
+    const { header, rows } = await fetchCsv(`data/statistical/${year}/tblT001108H34.csv`);
+    const keyIndex = header.indexOf('KEY_CODE');
+    const valueIndex = header.indexOf('roudousyasuu');
+    const map = new Map();
+    rows.forEach((cols) => {
+      const rawKey = cols[keyIndex];
+      if (!rawKey) return;
+      const key = String(rawKey).trim();
+      const value = valueIndex !== -1 ? toNumber(cols[valueIndex]) : 0;
+      map.set(key, value);
+    });
+    return map;
+  } catch (e) {
+    return new Map();
+  }
 }
 
 export async function loadFloorMap() {
@@ -148,14 +244,15 @@ export function computeTrafficByGrid(roadsData, trafficMap) {
   return gridTraffic;
 }
 
-export async function computeGridMetrics(gridData) {
+export async function computeGridMetrics(gridData, year = 2020) {
   if (!gridData) return { gridData, stats: { trafficMax: 0, populationMax: 0, floorMax: 0 } };
 
-  const [populationDetailMap, laborMap, floorMap, roadAreaMap] = await Promise.all([
-    loadPopulationDetailMap().catch(() => new Map()),
-    loadLaborMap().catch(() => new Map()),
+  const [populationDetailMap, laborMap, floorMap, roadAreaMap, popHistoryMap] = await Promise.all([
+    loadPopulationDetailMap(year).catch(() => new Map()),
+    loadLaborMap(year).catch(() => new Map()),
     loadFloorMap().catch(() => new Map()),
     loadRoadAreaMap().catch(() => new Map()),
+    loadPopulationHistory().catch(() => new Map()),
   ]);
 
   let trafficMax = 0;
@@ -170,13 +267,18 @@ export async function computeGridMetrics(gridData) {
 
   (gridData.features || []).forEach((feature) => {
     const props = feature.properties || {};
-    const key = props.KEY_CODE ? String(props.KEY_CODE) : '';
+    const key = props.KEY_CODE ? String(props.KEY_CODE).trim() : '';
     const detail = populationDetailMap.get(key) || {
       total: 0,
       pop0_14: 0,
       pop15_64: 0,
       pop65_over: 0,
     };
+    const popHist = popHistoryMap.get(key) || {};
+
+    props.pop_2020 = popHist.pop2020 || 0;
+    props.pop_2015 = popHist.pop2015 || 0;
+    props.pop_2010 = popHist.pop2010 || 0;
     const populationValue = detail.total;
     const laborValue = laborMap.get(key) || 0;
     const floorValue = floorMap.get(key) || 0;

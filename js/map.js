@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { mapStatus, roadsStatus } from './dom.js';
+import { mapStatus, roadsStatus, vizYearRadios } from './dom.js';
 import {
   loadGridData,
   loadRoadsData,
@@ -61,6 +61,10 @@ export function initMap(initialView) {
     ensureGridTraffic();
   });
 }
+
+window.addEventListener('viz:year:changed', (e) => {
+  reloadGridMetrics(e.detail.year);
+});
 
 export function addRoadLayer(geojson) {
   if (!state.map || !state.mapReady) return;
@@ -464,10 +468,16 @@ export function clearReportRangeSelection() {
   window.dispatchEvent(new CustomEvent('report:range:updated', { detail: { count: 0 } }));
 }
 
-async function hydrateGridMetrics() {
-  if (!state.gridData || state.gridMetricsLoaded) return;
+async function hydrateGridMetrics(year) {
+  if (mapStatus) mapStatus.textContent = `データ更新中 (${year}年)...`;
+  if (!state.gridData) return;
 
-  const { gridData, stats } = await computeGridMetrics(state.gridData);
+  if (!year && vizYearRadios) {
+    vizYearRadios.forEach(r => { if (r.checked) year = Number(r.value); });
+  }
+  if (!year) year = 2020;
+
+  const { gridData, stats } = await computeGridMetrics(state.gridData, year);
   state.gridData = gridData;
   state.gridStats = stats;
   state.gridMetricsLoaded = true;
@@ -482,19 +492,30 @@ async function hydrateGridMetrics() {
     state.map.getSource('grid-points').setData(points);
   }
   applyGridVisualization();
+  if (mapStatus) mapStatus.textContent = '地図表示中';
+}
+
+export async function reloadGridMetrics(year) {
+  await hydrateGridMetrics(year);
 }
 
 export async function loadGrid() {
+  let year = 2020;
+  if (vizYearRadios) {
+    const selected = Array.from(vizYearRadios).find(r => r.checked);
+    if (selected) year = Number(selected.value);
+  }
+
   if (state.gridData) {
     addGridLayer(state.gridData);
-    await hydrateGridMetrics();
+    await hydrateGridMetrics(year);
     return;
   }
   try {
     const geojson = await loadGridData();
     state.gridData = geojson;
     addGridLayer(geojson);
-    await hydrateGridMetrics();
+    await hydrateGridMetrics(year);
   } catch (err) {
     console.error(err);
   }

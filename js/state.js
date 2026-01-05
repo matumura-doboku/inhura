@@ -14,6 +14,7 @@ export const state = {
     polygon: null,
     gridIds: [],
   },
+  reportResults: [],
   reportRangeVisible: true,
   reportRangeInteractionState: null,
   gridStats: {
