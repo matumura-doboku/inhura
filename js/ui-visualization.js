@@ -28,6 +28,7 @@ import { state, vizThemes } from './state.js';
 const needsTraffic = (value) => value === 'traffic' || value === 'score';
 
 function getVisualProp(metric) {
+  if (metric === 'none') return 'none';
   if (metric === 'population') return 'population_norm';
   if (metric === 'labor') return 'labor_norm';
   if (metric === 'floor') return 'floor_norm';
@@ -44,6 +45,7 @@ function getVisualProp(metric) {
 }
 
 function getFilterProp(metric) {
+  if (metric === 'none') return 'none';
   if (metric === 'population') return 'population_value';
   if (metric === 'labor') return 'labor_value';
   if (metric === 'floor') return 'floor_value';
@@ -260,14 +262,16 @@ function countMatchingCells(prop, filterSpec, { requirePositive }) {
 }
 
 function updateTargetCounts({
+  mode,
+  secondaryMode,
   primaryProp,
   secondaryProp,
   primaryFilterSpec,
   secondaryFilterSpec,
 }) {
   if (!vizCountPrimary || !vizCountSecondary) return;
-  const primaryCount = countMatchingCells(primaryProp, primaryFilterSpec, { requirePositive: !primaryFilterSpec });
-  const secondaryCount = countMatchingCells(secondaryProp, secondaryFilterSpec, { requirePositive: true });
+  const primaryCount = mode === 'none' ? 0 : countMatchingCells(primaryProp, primaryFilterSpec, { requirePositive: !primaryFilterSpec });
+  const secondaryCount = secondaryMode === 'none' ? 0 : countMatchingCells(secondaryProp, secondaryFilterSpec, { requirePositive: true });
   vizCountPrimary.textContent = primaryCount == null ? '-' : primaryCount.toLocaleString();
   vizCountSecondary.textContent = secondaryCount == null ? '-' : secondaryCount.toLocaleString();
 }
@@ -348,7 +352,7 @@ export function applyGridVisualization() {
   const primaryValueExpr = ['coalesce', ['get', primaryProp], 0];
   const secondaryValueExpr = ['coalesce', ['get', secondaryProp], 0];
 
-  const primaryFilter = combineFilters(primaryFilterExpr) || ['>', primaryValueExpr, 0];
+  const primaryFilter = mode === 'none' ? false : (combineFilters(primaryFilterExpr) || ['>', primaryValueExpr, 0]);
 
   const colorExpr = [
     'case',
@@ -376,7 +380,7 @@ export function applyGridVisualization() {
   state.map.setPaintProperty('grid-line', 'line-color', '#000');
 
   if (state.map.getLayer('grid-circles')) {
-    const secondaryFilter = combineFilters(['>', secondaryValueExpr, 0], secondaryFilterExpr);
+    const secondaryFilter = secondaryMode === 'none' ? false : combineFilters(['>', secondaryValueExpr, 0], secondaryFilterExpr);
     const sizeExpr = [
       'case',
       secondaryFilter,
@@ -401,6 +405,8 @@ export function applyGridVisualization() {
   }
 
   updateTargetCounts({
+    mode,
+    secondaryMode,
     primaryProp: primaryFilterProp,
     secondaryProp: filterMode === 'primary-only' ? primaryFilterProp : secondaryFilterProp,
     primaryFilterSpec,
@@ -432,10 +438,14 @@ export function getGridFilterPredicate() {
 }
 
 function updateLegend() {
-  const theme = vizThemes[vizSelect.value] || vizThemes.traffic;
-  const secondaryTheme = vizThemes[vizSecondarySelect?.value] || theme;
-  const secondaryLabel = vizSecondarySelect?.value ? ` / ${secondaryTheme.label}` : '';
-  legendTitle.textContent = `色: ${theme.label}${secondaryLabel}`;
+  const mode = vizSelect.value;
+  const secondaryMode = vizSecondarySelect?.value || 'none';
+  const theme = vizThemes[mode] || vizThemes.traffic;
+  const secondaryTheme = vizThemes[secondaryMode] || theme;
+
+  const primaryLabel = theme.label;
+  const secondaryLabel = (secondaryMode !== 'none' && secondaryMode !== mode) ? ` / ${secondaryTheme.label}` : '';
+  legendTitle.textContent = `色: ${primaryLabel}${secondaryLabel}`;
   legendBar.style.background = `linear-gradient(90deg, ${theme.colors[0]}, ${theme.colors[1]})`;
   applyGridVisualization();
 }

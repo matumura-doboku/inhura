@@ -45,4 +45,5 @@ export const vizThemes = {
   ratio_15_64: { label: '年齢構成（15-65）', colors: ['#ecfeff', '#0f766e'] },
   ratio_65_over: { label: '年齢構成（65以上）', colors: ['#fff7ed', '#c2410c'] },
   score: { label: '必要度スコア', colors: ['#f0f4ff', '#2b4f9c'] },
+  none: { label: '選択なし', colors: ['transparent', 'transparent'] },
 };
